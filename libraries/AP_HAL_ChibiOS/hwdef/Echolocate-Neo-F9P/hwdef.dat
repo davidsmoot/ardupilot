@@ -25,8 +25,10 @@ SPIDEV rm3100 SPI1 DEVID1  MAG_CS   MODE3  1*MHZ  1*MHZ
 # Todo discuss / investigate data ready pin
 define AP_COMPASS_PROBING_ENABLED 1
 define AP_COMPASS_INTERNAL_BUS_PROBING_ENABLED 0
-COMPASS RM3100 SPI:rm3100 false ROTATION_NONE
+#COMPASS RM3100 SPI:rm3100 false ROTATION_NONE
 
 # We have a BMP390 but believe protocol identical to BMP388
 # Barometer on the first I2C bus at address 0x76
-BARO BMP388 I2C:1:0x76
+BARO BMP388 I2C:0:0x76
+
+COMPASS BMM350 I2C:0:0x14 
