@@ -32,3 +32,22 @@ define AP_COMPASS_INTERNAL_BUS_PROBING_ENABLED 0
 BARO BMP388 I2C:0:0x76
 
 COMPASS BMM350 I2C:0:0x14 
+
+#blatantly copied from MatekL431-Periph.  Not sure if correct or not.
+# ----------------------- GPS ----------------------------
+define AP_PERIPH_GPS_ENABLED 1
+define GPS_MAX_RATE_MS 200
+
+define GPS_MAX_RECEIVERS 1
+define GPS_MAX_INSTANCES 1
+
+#3 based on ../f103-periph/hwdef.inc line 31
+define HAL_PERIPH_GPS_PORT_DEFAULT 3
+
+# allow for F9P GPS modules with moving baseline
+define GPS_MOVING_BASELINE 1
+
+# restrict backends available to save flash (i.e. only UBLOX)
+define AP_GPS_NOVA_ENABLED 0
+define AP_GPS_SBF_ENABLED 0
+define AP_GPS_GSOF_ENABLED 0
