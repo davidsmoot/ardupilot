@@ -378,6 +378,11 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
         is_smoothed = true;
     }
     fdm.timestamp_us = time_now_us;
+    // keep track of the number of frames processed so that the IMUs can follow
+    if (flightaxis_sync_imus_to_frames) {
+        fdm.flightaxis_imu_frame_num++;
+    }
+
     if (fdm.home.lat == 0 && fdm.home.lng == 0) {
         // initialise home
         fdm.home = home;
@@ -1199,6 +1204,14 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
 #endif
 #if AP_SIM_GPIO_LED_RGB_ENABLED
     sim_ledrgb.update(*this);
+#endif
+
+#if AP_SIM_MOUNT_ENABLED
+    for (uint8_t i = 0; i < GIMBAL_SIM_MAX; i++) {
+        if (gimbal_sims[i] != nullptr) {
+            gimbal_sims[i]->update(*this);
+        }
+    }
 #endif
 }
 

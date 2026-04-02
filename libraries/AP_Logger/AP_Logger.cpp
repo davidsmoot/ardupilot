@@ -25,7 +25,8 @@ extern const AP_HAL::HAL& hal;
 
 #ifndef HAL_LOGGING_FILE_BUFSIZE
 #if HAL_MEM_CLASS >= HAL_MEM_CLASS_1000
-#define HAL_LOGGING_FILE_BUFSIZE  200
+// adjust buffer size for extra space allocated on more capable boards
+#define HAL_LOGGING_FILE_BUFSIZE  (200-((AP_FATFS_MAX_IO_SIZE-AP_FATFS_MIN_IO_SIZE)/1024))
 #elif HAL_MEM_CLASS >= HAL_MEM_CLASS_500
 #define HAL_LOGGING_FILE_BUFSIZE  80
 #elif HAL_MEM_CLASS >= HAL_MEM_CLASS_300
@@ -698,6 +699,14 @@ void AP_Logger::setVehicle_Startup_Writer(vehicle_startup_message_Writer writer)
     _vehicle_messages = writer;
 }
 
+#if AP_RTC_LOGGING_ENABLED
+// Write RTC data
+void AP_Logger::Write_RTC()
+{
+    FOR_EACH_BACKEND(Write_RTC());
+}
+#endif  // AP_RTC_LOGGING_ENABLED
+
 void AP_Logger::set_vehicle_armed(const bool armed_state)
 {
     if (armed_state == _armed) {
@@ -906,6 +915,10 @@ void AP_Logger::Write_EntireMission()
 void AP_Logger::Write_Message(const char *message)
 {
     FOR_EACH_BACKEND(Write_Message(message));
+}
+void AP_Logger::Write_MessageChunk(uint8_t id, const char *messagechunk, uint8_t chunk_seq)
+{
+    FOR_EACH_BACKEND(Write_MessageChunk(id, messagechunk, chunk_seq));
 }
 
 void AP_Logger::Write_Mode(uint8_t mode, const ModeReason reason)
@@ -1369,8 +1382,8 @@ bool AP_Logger::fill_logstructure(struct LogStructure &logstruct, const uint8_t 
  * Tools/Replay/MsgHandler.cpp */
 int16_t AP_Logger::Write_calc_msg_len(const char *fmt) const
 {
-    uint8_t len =  LOG_PACKET_HEADER_LEN;
-    for (uint8_t i=0; i<strlen(fmt); i++) {
+    size_t len = LOG_PACKET_HEADER_LEN;
+    for (size_t i=0; i<strlen(fmt); i++) {
         switch(fmt[i]) {
         case 'a' : len += sizeof(int16_t[32]); break;
         case 'b' : len += sizeof(int8_t); break;
@@ -1400,7 +1413,10 @@ int16_t AP_Logger::Write_calc_msg_len(const char *fmt) const
             return -1;
         }
     }
-    return len;
+    if (len > LOG_PACKET_MAX_LEN) {
+        return -1;
+    }
+    return (int16_t)len;
 }
 
 /*

@@ -5,20 +5,22 @@ AP_FLAKE8_CLEAN
 
 '''
 
-import os
-import numpy
-import math
 import copy
+import math
+import operator
+import os
+
+import numpy
 
 from pymavlink import mavutil
 from pymavlink.rotmat import Vector3
 
 import vehicle_test_suite
+
+from vehicle_test_suite import AutoTestTimeoutException
+from vehicle_test_suite import NotAchievedException
+from vehicle_test_suite import PreconditionFailedException
 from vehicle_test_suite import Test
-from vehicle_test_suite import AutoTestTimeoutException, NotAchievedException, PreconditionFailedException
-
-import operator
-
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -342,19 +344,47 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         self.wait_extended_sys_state(mavutil.mavlink.MAV_VTOL_STATE_FW,
                                      mavutil.mavlink.MAV_LANDED_STATE_IN_AIR)
 
-        self.progress("Transitioning to multicopter")
-        self.set_rc(3, 1500) # apply reins
-        self.change_mode("QHOVER")
-        # for a standard quadplane there is no transition-to-mc stage.
-        # tailsitters do have such a state.
+        # fly away from home so QRTL has a full landing approach
+        self.wait_distance_to_home(400, 1000, timeout=60)
+
+        # verify vtol_state goes FW -> TRANSITION_TO_MC -> MC during QRTL
+        # with nothing else in between.
+        self.progress("Commanding QRTL and collecting vtol_state transitions")
+        self.context_push()
+        self.context_collect('EXTENDED_SYS_STATE')
+        self.set_rc(3, 1500)
+        self.change_mode("QRTL")
         self.wait_extended_sys_state(mavutil.mavlink.MAV_VTOL_STATE_MC,
-                                     mavutil.mavlink.MAV_LANDED_STATE_IN_AIR)
-        self.change_mode("QLAND")
-        self.wait_altitude(0, 2, relative=True, timeout=60)
+                                     mavutil.mavlink.MAV_LANDED_STATE_IN_AIR,
+                                     timeout=60)
+        # Save the sequence of states during the approach to check sequencing later
+        messages = self.context_collection('EXTENDED_SYS_STATE')
+        self.context_pop()
         self.wait_extended_sys_state(mavutil.mavlink.MAV_VTOL_STATE_MC,
                                      mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND,
-                                     timeout=30)
-        self.mav.motors_disarmed_wait()
+                                     timeout=60)
+        self.wait_disarmed(timeout=60)
+
+        # Check that the sequence of vtol states during that landing was correct.
+        vtol_states = []
+        for m in messages:
+            if not vtol_states or vtol_states[-1] != m.vtol_state:
+                vtol_states.append(m.vtol_state)
+
+        expected = [
+            mavutil.mavlink.MAV_VTOL_STATE_FW,
+            mavutil.mavlink.MAV_VTOL_STATE_TRANSITION_TO_MC,
+            mavutil.mavlink.MAV_VTOL_STATE_MC,
+        ]
+
+        state_names = [self.vtol_state_name(s) for s in vtol_states]
+        self.progress("vtol_state sequence: %s" % state_names)
+
+        if vtol_states != expected:
+            expected_names = [self.vtol_state_name(s) for s in expected]
+            raise NotAchievedException(
+                "Unexpected vtol_state sequence during QRTL landing: "
+                "got %s expected %s" % (state_names, expected_names))
 
     def EXTENDED_SYS_STATE(self):
         '''Check extended sys state works'''
@@ -387,17 +417,17 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             "Q_A_RAT_RLL_I",
             "Q_A_RAT_RLL_D",
             "Q_A_ANG_RLL_P",
-            "Q_A_ACCEL_R_MAX",
+            "Q_A_ACC_R_MAX",
+            "Q_A_ACC_P_MAX",
+            "Q_A_ACC_Y_MAX",
             "Q_A_RAT_PIT_P",
             "Q_A_RAT_PIT_I",
             "Q_A_RAT_PIT_D",
             "Q_A_ANG_PIT_P",
-            "Q_A_ACCEL_P_MAX",
             "Q_A_RAT_YAW_P",
             "Q_A_RAT_YAW_I",
             "Q_A_RAT_YAW_FLTE",
             "Q_A_ANG_YAW_P",
-            "Q_A_ACCEL_Y_MAX",
         ])
         self.set_parameters(parameter_values)
 
@@ -1269,6 +1299,51 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         self.change_mode('AUTO')
         self.wait_disarmed(timeout=300)
 
+    def ICEngineRPMGovernor(self):
+        '''Test ICE idle and redline governor'''
+        self.setup_ICEngine_vehicle()
+
+        # allow running while disarmed
+        options = int(self.get_parameter("ICE_OPTIONS"))
+        options |= 1 << 2
+        self.set_parameter("ICE_OPTIONS", options)
+
+        self.start_subtest("ICEngine idle governor")
+        # idle governor should work even in non-manual mode
+        self.change_mode('QHOVER')
+        self.run_cmd(mavutil.mavlink.MAV_CMD_DO_ENGINE_CONTROL, p1=1)
+
+        deadband = 50
+        self.set_parameter("ICE_IDLE_DB", deadband)
+        # Test two RPM settings to make sure we don't pass as a fluke
+        for idle_rpm in (1000, 1500):
+            self.set_parameter("ICE_IDLE_RPM", idle_rpm)
+            self.wait_rpm(
+                1,
+                idle_rpm - 1.1 * deadband,
+                idle_rpm + 1.1 * deadband,
+                timeout=60,
+                minimum_duration=15,
+            )
+
+        self.start_subtest("ICEngine redline governor")
+        self.change_mode('MANUAL')
+        # The redline governor only works properly while armed
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.set_rc(3, 2000)
+        for redline_rpm in (6500, 6000):
+            self.set_parameter("ICE_REDLINE_RPM", redline_rpm)
+            self.wait_rpm(
+                1,
+                redline_rpm - 2 * deadband,
+                redline_rpm,
+                timeout=60,
+                minimum_duration=15,
+            )
+        self.set_rc(3, 1000)
+        self.disarm_vehicle()
+
     def MAV_CMD_DO_ENGINE_CONTROL(self):
         '''test MAV_CMD_DO_ENGINE_CONTROL mavlink command'''
 
@@ -1646,7 +1721,11 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             "SCR_ENABLE": 1,
             "SIM_SHIP_ENABLE": 1,
             "SIM_SHIP_SPEED": 5,
-            "Q_WP_SPEED": 700,
+            "Q_WP_SPD": 7.0,
+            "Q_P_NE_POS_P": 0.25,
+            "Q_P_NE_VEL_D": 0.25,
+            "Q_P_NE_VEL_I": 0.25,
+            "Q_P_NE_VEL_P": 1.0,
             "SIM_SHIP_DSIZE": 10,
             "FOLL_ENABLE": 1,
             "FOLL_SYSID": 17,
@@ -1738,7 +1817,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             "COMPASS_USE": 0,
             "COMPASS_USE2": 0,
             "COMPASS_USE3": 0,
-            "ARMING_CHECK": 589818,  # from a logfile, disables compass
+            "ARMING_SKIPCHK": 1 << 2,  # disables compass
         })
 
         self.reboot_sitl()
@@ -2039,7 +2118,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         })
         self.reboot_sitl()
 
-        self.assert_mode_is('FBWA')
+        self.wait_mode('FBWA')  # initial mode from parameter
         self.delay_sim_time(10)
         self.change_mode('QHOVER')
         self.delay_sim_time(10)
@@ -2466,9 +2545,9 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         '''test recovery from inverted flight is fast'''
 
         self.set_parameters({
-            "Q_A_ACCEL_R_MAX": 20000,
-            "Q_A_ACCEL_P_MAX": 20000,
-            "Q_A_ACCEL_Y_MAX": 20000,
+            "Q_A_ACC_R_MAX": 200,
+            "Q_A_ACC_P_MAX": 200,
+            "Q_A_ACC_Y_MAX": 200,
             "Q_A_RATE_R_MAX": 50,
             "Q_A_RATE_P_MAX": 50,
             "Q_A_RATE_Y_MAX": 50,
@@ -2781,6 +2860,10 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         self.set_parameter("Q_OPTIONS", 1)
         self.wait_text("ArmCk: note: Q will land", check_context=True)
 
+    def FenceRelative_TakeoffMode(self):
+        '''method for the FenceRelative test to call'''
+        return 'QLOITER'
+
     def TerrainAvoidApplet(self):
         '''Terrain Avoidance with CMTC'''
         self.start_subtest("Terrain Avoidance Load and Start")
@@ -2973,6 +3056,55 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         # remove the installed module. Pretty sure Autotest will remove the script itself
         self.remove_installed_script_module("mavlink_wrappers.lua")
 
+    def TakeoffCheck(self):
+        '''Test takeoff check - auto mode'''
+        self.set_parameters({
+            "AHRS_EKF_TYPE": 10,
+            'SIM_ESC_TELEM': 1,
+        })
+
+        self.start_subtest("Test blocking doesn't occur with in-range RPM")
+        self.context_push()
+        self.set_parameters({
+            'SIM_VIB_MOT_MAX': 150, # Hz, 9000 RPM, ensures the test fails if check occurs after takeoff starts
+            'SIM_ESC_ARM_RPM': 1000,
+            'Q_TKOFF_RPM_MIN': 900,
+            'Q_TKOFF_RPM_MAX': 1100,
+        })
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_VTOL_TAKEOFF, 0, 0, 1),
+            (mavutil.mavlink.MAV_CMD_NAV_VTOL_LAND, 0, 0, 0),
+        ])
+        self.change_mode('AUTO')
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.wait_current_waypoint(2)
+        self.wait_disarmed()
+        self.set_current_waypoint(0, check_afterwards=False)
+        self.context_pop()
+
+        self.start_subtest("Ensure blocked if motors don't spool up")
+        self.context_push()
+        self.set_parameters({
+            'SIM_ESC_ARM_RPM': 500,
+            'Q_TKOFF_RPM_MIN': 1000,
+        })
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 30),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.test_takeoff_check_mode("AUTO", force_disarm=True)
+        self.context_pop()
+
+        self.start_subtest("Ensure blocked if virtual motors are missing virtual props")
+        self.context_push()
+        self.set_parameters({
+            'Q_TKOFF_RPM_MIN': 1,
+            'Q_TKOFF_RPM_MAX': 3,
+        })
+        self.test_takeoff_check_mode("AUTO", force_disarm=True)
+        self.context_pop()
+
     def tests(self):
         '''return list of all tests'''
 
@@ -2995,6 +3127,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.CopterTailsitter,
             self.ICEngine,
             self.ICEngineMission,
+            self.ICEngineRPMGovernor,
             self.MAV_CMD_DO_ENGINE_CONTROL,
             self.MidAirDisarmDisallowed,
             self.GUIDEDToAUTO,
@@ -3034,5 +3167,21 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.RudderArmingWithARMING_CHECK_THROTTLEUnset,
             self.ScriptedArmingChecksApplet,
             self.TerrainAvoidApplet,
+            self.TakeoffCheck,
+            self.FenceRelativePreArms,
+            self.FenceRelativeToHomeMaxAlt,
+            self.FenceRelativeToHomeMinAlt,
+            self.FenceRelativeToHomeMaxAltOriginAbove,
+            self.FenceRelativeToHomeMinAltOriginAbove,
+            self.FenceRelativeToHomeCliff,
+            self.FenceRelativeToOriginMaxAlt,
+            self.FenceRelativeToOriginMinAlt,
+            self.FenceRelativeToOriginMaxAltHomeAbove,
+            self.FenceRelativeToOriginMinAltHomeAbove,
+            self.FenceRelativeToAMSLMaxAlt,
+            self.FenceRelativeToAMSLMinAlt,
+            self.FenceRelativeToAMSLCliff,
+            self.FenceRelativeToTerrainMaxAlt,
+            self.FenceRelativeToTerrainMinAlt,
         ])
         return ret
