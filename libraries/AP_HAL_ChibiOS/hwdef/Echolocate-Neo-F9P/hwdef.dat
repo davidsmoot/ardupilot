@@ -31,7 +31,7 @@ define AP_COMPASS_INTERNAL_BUS_PROBING_ENABLED 0
 # Barometer on the first I2C bus at address 0x76
 BARO BMP388 I2C:0:0x76
 
-COMPASS BMM350 I2C:0:0x14 
+#COMPASS BMM350 I2C:0:0x14 
 
 #blatantly copied from MatekL431-Periph.  Not sure if correct or not.
 # ----------------------- GPS ----------------------------
