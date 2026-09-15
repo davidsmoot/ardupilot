@@ -1,34 +1,53 @@
-include ../f103-periph/hwdef.inc
+include ../f303-periph/hwdef.inc
+
+#Pins on our board handled by the include above:
+#GPS on PA9 and PA10
+#LED on PA4
+#I2C on PB6 and PB7
+#PB0 as PB0 MAG_CS CS
+#SPI port on PA5, PA6, PA7
+#CAN on PA11 and PA12
+#debugger on PA13 and PA14
+
+#override the includes UART2 for debug 
+undef SERIAL_ORDER
+# order of UARTs
+SERIAL_ORDER USART3 EMPTY EMPTY USART1
+
+undef PA2
+undef PA3
+
+# USART3 for debug
+PB10 USART3_TX USART3 SPEED_HIGH NODMA
+PB11 USART3_RX USART3 SPEED_HIGH NODMA
 
 
+#ADC disabled in include
+#PA0 CAN_5VSENSE ADC1 SCALE(1)
 
-#pins not accounted for in f103-periph include
-#PA8 is tied to PA9 in the schematic but not sure why 
-#not sure yet how to utilize PB8 / CAN_5VSense
 
-# Our LED is on PA4 but active high
-#undef PA4
-#PA4 LED OUTPUT HIGH
-
-# these are the pins for SWD debugging with a STlinkv2 or black-magic probe
-#PA13 JTMS-SWDIO SWD
-#PA14 JTCK-SWCLK SWD
 
 # SPI1 - RM3100
-PA5 SPI1_SCK SPI1
-PA6 SPI1_MISO SPI1
-
-
+# f303-periph/hwdef.inc already defines PA5/PA6/PA7 as SPI1 SCK/MISO/MOSI and
+# PB0 as MAG_CS - do not redeclare them here, it causes a "Pin redefined" error.
 SPIDEV rm3100 SPI1 DEVID1  MAG_CS   MODE3  1*MHZ  1*MHZ
 
 # compass Todo understand the probing options
-# Todo discuss / investigate data ready pin
+# RM3100 data-ready pin, confirmed via schematic trace: PB13
+PB13 RM3100_DRDY INPUT
 define AP_COMPASS_PROBING_ENABLED 1
 define AP_COMPASS_INTERNAL_BUS_PROBING_ENABLED 0
 #COMPASS RM3100 SPI:rm3100 false ROTATION_NONE
 
+# Barometer interrupt line, confirmed via schematic trace: PB12
+PB12 PRESSURE_INT INPUT
+
 # We have a BMP390 but believe protocol identical to BMP388
 # Barometer on the first I2C bus at address 0x76
+# NOTE: schematic trace found no BMP388/BMP390 part anywhere on this board - the
+# stuffed sensors are BMM350 (magnetometer), LPS22DFTR and MS5611, all shown
+# populated. Needs a BOM/board check to confirm what is actually fitted before
+# this line can be trusted.
 BARO BMP388 I2C:0:0x76
 
 #COMPASS BMM350 I2C:0:0x14 
@@ -37,12 +56,6 @@ BARO BMP388 I2C:0:0x76
 # ----------------------- GPS ----------------------------
 define AP_PERIPH_GPS_ENABLED 1
 define GPS_MAX_RATE_MS 200
-
-define GPS_MAX_RECEIVERS 1
-define GPS_MAX_INSTANCES 1
-
-#3 based on ../f103-periph/hwdef.inc line 31
-define HAL_PERIPH_GPS_PORT_DEFAULT 3
 
 # allow for F9P GPS modules with moving baseline
 define GPS_MOVING_BASELINE 1
