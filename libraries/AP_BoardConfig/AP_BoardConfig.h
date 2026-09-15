@@ -69,7 +69,7 @@ public:
         FMUV6_BOARD_HOLYBRO_6X = 40,
         FMUV6_BOARD_CUAV_6X = 41,
         FMUV6_BOARD_HOLYBRO_6X_REV6 = 42,
-        FMUV6_BOARD_HOLYBRO_6X_45686 = 43,
+        FMUV6_BOARD_HOLYBRO_6X_REV8 = 43,
         PX4_BOARD_OLDDRIVERS = 100,
     };
 
@@ -251,8 +251,10 @@ private:
         AP_Int8 safety_enable;
         AP_Int16 safety_option;
         AP_Int32 ignore_safety_channels;
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+#if AP_FEATURE_RTSCTS
         AP_Int8 ser_rtscts[9];
+#endif
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
         AP_Int8 sbus_out_rate;
 #endif
 #if AP_CPU_IDLE_STATS_ENABLED
@@ -279,6 +281,8 @@ private:
     void validate_board_type(void);
     void board_autodetect(void);
     void detect_fmuv6_variant(void);
+    bool probe_lsm6dsv_family(const char *devname);
+    bool probe_compatible_imu_slot(const char *icm_devname, const char *lsm6_devname);
     bool check_ms5611(const char* devname);
 
 #endif // AP_FEATURE_BOARD_DETECT
