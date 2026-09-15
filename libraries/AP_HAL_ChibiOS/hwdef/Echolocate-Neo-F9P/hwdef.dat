@@ -26,7 +26,6 @@ PB11 USART3_RX USART3 SPEED_HIGH NODMA
 #PA0 CAN_5VSENSE ADC1 SCALE(1)
 
 
-
 # SPI1 - RM3100
 # f303-periph/hwdef.inc already defines PA5/PA6/PA7 as SPI1 SCK/MISO/MOSI and
 # PB0 as MAG_CS - do not redeclare them here, it causes a "Pin redefined" error.
@@ -42,15 +41,18 @@ define AP_COMPASS_INTERNAL_BUS_PROBING_ENABLED 0
 # Barometer interrupt line, confirmed via schematic trace: PB12
 PB12 PRESSURE_INT INPUT
 
-# We have a BMP390 but believe protocol identical to BMP388
-# Barometer on the first I2C bus at address 0x76
-# NOTE: schematic trace found no BMP388/BMP390 part anywhere on this board - the
-# stuffed sensors are BMM350 (magnetometer), LPS22DFTR and MS5611, all shown
-# populated. Needs a BOM/board check to confirm what is actually fitted before
-# this line can be trusted.
-BARO BMP388 I2C:0:0x76
+# Barometer on the first I2C bus.
+# Confirmed via schematic trace: no BMP388/BMP390 exists on this board. Two
+# populated barometers are actually fitted: MS561101BA03-50 (MS5611) and
+# LPS22DFTR. Both address-select pins are hard-strapped to 3V3 (no pull
+# resistor), giving MS5611 @ 0x76 and LPS22DFTR (SA0=1) @ 0x5D.
+# MS5611 is primary; swap the comment to the LPS2XH line below to test the
+# other chip instead (only one BARO line should be active at a time so the
+# board reports a single, known baro instance while bringing up hardware).
+BARO MS5611 I2C:0:0x76
+#BARO LPS2XH I2C:0:0x5D
 
-#COMPASS BMM350 I2C:0:0x14 
+COMPASS BMM350 I2C:0:0x14 
 
 #blatantly copied from MatekL431-Periph.  Not sure if correct or not.
 # ----------------------- GPS ----------------------------
