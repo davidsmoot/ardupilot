@@ -52,7 +52,7 @@ PB12 PRESSURE_INT INPUT
 BARO MS5611 I2C:0:0x76
 #BARO LPS2XH I2C:0:0x5D
 
-COMPASS BMM350 I2C:0:0x14 
+COMPASS BMM350 I2C:0:0x14 false ROTATION_NONE
 
 #blatantly copied from MatekL431-Periph.  Not sure if correct or not.
 # ----------------------- GPS ----------------------------
